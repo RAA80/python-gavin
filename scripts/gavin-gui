@@ -1,0 +1,689 @@
+#! /usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import logging
+import os
+
+
+if os.name == 'nt':                                 # sys.platform == 'win32':
+    from serial.tools.list_ports_windows import comports
+elif os.name == 'posix':
+    from serial.tools.list_ports_linux import SysFS
+    import glob
+
+    def comports():
+        devices = glob.glob('/dev/ttyS*')           # built-in serial ports
+        devices.extend(glob.glob('/dev/ttyUSB*'))   # usb-serial with own driver
+        devices.extend(glob.glob('/dev/ttyMI*'))    # MOXA serial devices
+        return [info
+                for info in [SysFS(d) for d in devices]
+                if info.subsystem != "platform"]    # hide non-present internal serial ports
+
+
+try:
+    import tkinter as Tkinter       # for Python3
+    from tkinter import ttk
+except ImportError:
+    import Tkinter                  # for Python2
+    import ttk
+
+
+logging.basicConfig(level=logging.INFO)
+
+
+class GavinGui(object):
+    def __init__(self):
+        root = Tkinter.Tk()
+        root.title("Cooled Standard Module Controller")
+        root.resizable(False, False)
+
+        tabs = ttk.Notebook(root)
+
+        tab1 = ttk.Frame(tabs)
+        tab2 = ttk.Frame(tabs)
+        tab3 = ttk.Frame(tabs)
+        tab4 = ttk.Frame(tabs)
+        tab5 = ttk.Frame(tabs)
+        tab6 = ttk.Frame(tabs)
+
+        tabs.add(tab1, text='Setting')
+        tabs.add(tab2, text='Video')
+        tabs.add(tab3, text='Algorithm')
+        tabs.add(tab4, text='Optics')
+        tabs.add(tab5, text='NUC')
+        tabs.add(tab6, text='Upgrade')
+
+        tabs.pack(expand=False, fill="both")
+
+
+        frame1 = ttk.Frame(tab1)
+        frame1.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        portframe = ttk.LabelFrame(frame1, text="Serial Port", labelanchor='n')
+        portframe.pack(side="left", fill="both", pady=2, padx=2)
+
+        iterator = sorted(comports())
+        portlist = [port for n, (port, desc, hwid) in enumerate(iterator, 1)]
+        portcombo = ttk.Combobox(portframe, values=portlist, state='readonly', justify="center")
+        portcombo.pack(side="top", fill="x", pady=2, padx=2)
+
+        baudrateframe = ttk.LabelFrame(frame1, text="Baudrate", labelanchor='n')
+        baudrateframe.pack(side="left", fill="both", pady=2, padx=2)
+
+        baudratelist = [9600, 19200, 38400, 115200]
+        baudratecombo = ttk.Combobox(baudrateframe, values=baudratelist, state='readonly', justify="center")
+        baudratecombo.pack(side="top", fill="x", pady=2, padx=2)
+
+        connectbutton = ttk.Button(frame1, text="Connect", state="normal", command=self.connect)
+        connectbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame2 = ttk.Frame(tab1)
+        frame2.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        framerateframe = ttk.LabelFrame(frame2, text="Frame Rate", labelanchor='n')
+        framerateframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frameratespin = Tkinter.Spinbox(framerateframe, from_=1, to=100, increment=1, width=13, justify="center")
+        frameratespin.pack(side="left", fill="x", pady=2, padx=2)
+
+        setbutton = ttk.Button(framerateframe, text="Set", state="normal", command=self.set)
+        setbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        testimageframe = ttk.LabelFrame(frame2, text="Test Image", labelanchor='n')
+        testimageframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        testimagelist = ['RealTime', 'Test1', 'Test2', 'Test3', 'Test4', 'Test5', 'Test6', 'Test7']
+        testimagecombo = ttk.Combobox(testimageframe, values=testimagelist, state='readonly', justify="center")
+        testimagecombo.pack(side="top", fill="x", pady=2, padx=2)
+
+
+        frame3 = ttk.Frame(tab1)
+        frame3.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        synmodeframe = ttk.LabelFrame(frame3, text="Syn Mode", labelanchor='n')
+        synmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        synmoderadiobutton1 = ttk.Radiobutton(synmodeframe, text='In', value=1)
+        synmoderadiobutton1.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        synmoderadiobutton2 = ttk.Radiobutton(synmodeframe, text='Out', value=2)
+        synmoderadiobutton2.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        synmoderadiobutton3 = ttk.Radiobutton(synmodeframe, text='Auto', value=3)
+        synmoderadiobutton3.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        observationmodeframe = ttk.LabelFrame(frame3, text="Observation Mode", labelanchor='n')
+        observationmodeframe.pack(side="left", fill="both", pady=2, padx=2)
+
+        observationmodelist = ['Advanced', 'Gain1', 'Gain2', 'Gain3', 'Gain4']
+        observationmodecombo = ttk.Combobox(observationmodeframe, values=observationmodelist, state='readonly', justify="center")
+        observationmodecombo.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame4 = ttk.Frame(tab1)
+        frame4.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        systemtempriseframe = ttk.LabelFrame(frame4, text="System Temp Rise", labelanchor='n')
+        systemtempriseframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        systemtemprisescale = Tkinter.Scale(systemtempriseframe, from_=0, to=50, orient="horizontal")
+        systemtemprisescale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        intintensityframe = ttk.LabelFrame(frame4, text="INT Intensity", labelanchor='n')
+        intintensityframe.pack(side="left", fill="both", pady=2, padx=2)
+
+        intintensitylist = ['Auto', 'Gain1', 'Gain2', 'Gain3']
+        intintensitycombo = ttk.Combobox(intintensityframe, values=intintensitylist, state='readonly', justify="center")
+        intintensitycombo.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame5 = ttk.Frame(tab1)
+        frame5.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        label1label = ttk.Label(frame5, text="Ambient = ")
+        label1label.pack(side="top", fill="x", pady=2, padx=2)
+
+        label2label = ttk.Label(frame5, text="FPA = ")
+        label2label.pack(side="top", fill="x", pady=2, padx=2)
+
+        label3label = ttk.Label(frame5, text="DeviceID = ")
+        label3label.pack(side="top", fill="x", pady=2, padx=2)
+
+        label4label = ttk.Label(frame5, text="FPGA Version = ")
+        label4label.pack(side="top", fill="x", pady=2, padx=2)
+
+
+        frame6 = ttk.Frame(tab1)
+        frame6.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        savesettingbutton = ttk.Button(frame6, text="Save Setting", state="normal", command=self.save)
+        savesettingbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        resetsettingbutton = ttk.Button(frame6, text="Reset Setting", state="normal", command=self.reset)
+        resetsettingbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+
+        frame7 = ttk.Frame(tab2)
+        frame7.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        imagesourcemodeframe = ttk.LabelFrame(frame7, text="Image Source Mode", labelanchor='n')
+        imagesourcemodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        ismyradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='Y', value=4)
+        ismyradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ismxradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='X', value=5)
+        ismxradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ismkradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='K', value=6)
+        ismkradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ismbradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='B', value=7)
+        ismbradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        lvdsvideomodeframe = ttk.LabelFrame(frame7, text="LVDS Video Mode", labelanchor='n')
+        lvdsvideomodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        lvdsvmy16radiobutton = ttk.Radiobutton(lvdsvideomodeframe, text='Y16', value=8)
+        lvdsvmy16radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        lvdsvmy8radiobutton = ttk.Radiobutton(lvdsvideomodeframe, text='Y8', value=9)
+        lvdsvmy8radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        lvdsvmxradiobutton = ttk.Radiobutton(lvdsvideomodeframe, text='K', value=10)
+        lvdsvmxradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame8 = ttk.Frame(tab2)
+        frame8.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        mirrorframe = ttk.LabelFrame(frame8, text="Mirror", labelanchor='n')
+        mirrorframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        mirrornoneradiobutton = ttk.Radiobutton(mirrorframe, text='None', value=11)
+        mirrornoneradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        mirrorxradiobutton = ttk.Radiobutton(mirrorframe, text='X', value=12)
+        mirrorxradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        mirroryradiobutton = ttk.Radiobutton(mirrorframe, text='Y', value=13)
+        mirroryradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        mirrorxyradiobutton = ttk.Radiobutton(mirrorframe, text='XY', value=14)
+        mirrorxyradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        zoomframe = ttk.LabelFrame(frame8, text="Zoom", labelanchor='n')
+        zoomframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        zoomx1radiobutton = ttk.Radiobutton(zoomframe, text='X1', value=15)
+        zoomx1radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        zoomx2radiobutton = ttk.Radiobutton(zoomframe, text='X2', value=16)
+        zoomx2radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        zoomx4radiobutton = ttk.Radiobutton(zoomframe, text='X4', value=17)
+        zoomx4radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame9 = ttk.Frame(tab2)
+        frame9.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        paletteframe = ttk.LabelFrame(frame9, text="Palette", labelanchor='n')
+        paletteframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        palettelist = ['WhiteHot', 'BlackHot', 'IronRed', 'HotIron', 'Medical', 'Arctic', 'Rainbow1', 'Rainbow2']
+        palettecombo = ttk.Combobox(paletteframe, values=palettelist, state='readonly', justify="center")
+        palettecombo.pack(side="top", fill="x", pady=2, padx=2)
+
+        testinfoframe = ttk.LabelFrame(frame9, text="Test Info", labelanchor='n')
+        testinfoframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        testinfolist = ['None', 'Test1', 'Test2', 'Test3']
+        palettecombo = ttk.Combobox(testinfoframe, values=testinfolist, state='readonly', justify="center")
+        palettecombo.pack(side="top", fill="x", pady=2, padx=2)
+
+
+        frame10 = ttk.Frame(tab2)
+        frame10.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        cursorframe = ttk.LabelFrame(frame10, text="Cursor", labelanchor='n')
+        cursorframe.pack(side="left", fill="both", pady=2, padx=2)
+
+        frame11 = ttk.Frame(cursorframe)
+        frame11.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        cursoronradiobutton = ttk.Radiobutton(frame11, text='On', value=18)
+        cursoronradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        cursoroffradiobutton = ttk.Radiobutton(frame11, text='Off', value=19)
+        cursoroffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        frame12 = ttk.Frame(cursorframe)
+        frame12.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        cursorxlabel = ttk.Label(frame12, text="X")
+        cursorxlabel.pack(side="left", fill="x", pady=2, padx=2)
+
+        cursorxspin = Tkinter.Spinbox(frame12, from_=1, to=1000, increment=1, width=13, justify="center")
+        cursorxspin.pack(side="left", fill="x", pady=2, padx=2)
+
+        cursorxsetbutton = ttk.Button(frame12, text="Set", state="normal", command=self.set)
+        cursorxsetbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        frame13 = ttk.Frame(cursorframe)
+        frame13.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        cursorylabel = ttk.Label(frame13, text="Y")
+        cursorylabel.pack(side="left", fill="x", pady=2, padx=2)
+
+        cursoryspin = Tkinter.Spinbox(frame13, from_=1, to=1000, increment=1, width=13, justify="center")
+        cursoryspin.pack(side="left", fill="x", pady=2, padx=2)
+
+        cursorysetbutton = ttk.Button(frame13, text="Set", state="normal", command=self.set)
+        cursorysetbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+
+        frame14 = ttk.Frame(tab3)
+        frame14.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        timefilterframe = ttk.LabelFrame(frame14, text="Time Filter", labelanchor='n')
+        timefilterframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame15 = ttk.Frame(timefilterframe)
+        frame15.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        timefilteronradiobutton = ttk.Radiobutton(frame15, text='On', value=20)
+        timefilteronradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        timefilteroffradiobutton = ttk.Radiobutton(frame15, text='Off', value=21)
+        timefilteroffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        frame16 = ttk.Frame(timefilterframe)
+        frame16.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        timefilterscale = Tkinter.Scale(frame16, from_=0, to=94, orient="horizontal")
+        timefilterscale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        removeverticalstripeframe = ttk.LabelFrame(frame14, text="Remove Vertical Stripe", labelanchor='n')
+        removeverticalstripeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame17 = ttk.Frame(removeverticalstripeframe)
+        frame17.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        removeverticalstripeonradiobutton = ttk.Radiobutton(frame17, text='On', value=22)
+        removeverticalstripeonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        removeverticalstripeoffradiobutton = ttk.Radiobutton(frame17, text='Off', value=23)
+        removeverticalstripeoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        frame18 = ttk.Frame(removeverticalstripeframe)
+        frame18.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        removeverticalstripescale = Tkinter.Scale(frame18, from_=0, to=4, orient="horizontal")
+        removeverticalstripescale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame19 = ttk.Frame(tab3)
+        frame19.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        spacefilterframe = ttk.LabelFrame(frame19, text="Space Filter", labelanchor='n')
+        spacefilterframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame20 = ttk.Frame(spacefilterframe)
+        frame20.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        spacefilteronradiobutton = ttk.Radiobutton(frame20, text='On', value=24)
+        spacefilteronradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        spacefilteroffradiobutton = ttk.Radiobutton(frame20, text='Off', value=25)
+        spacefilteroffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        frame21 = ttk.Frame(spacefilterframe)
+        frame21.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        spacefilterscale = Tkinter.Scale(frame21, from_=0, to=9, orient="horizontal")
+        spacefilterscale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ddeframe = ttk.LabelFrame(frame19, text="DDE", labelanchor='n')
+        ddeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        ddescale = Tkinter.Scale(ddeframe, from_=0, to=15, orient="horizontal")
+        ddescale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame22 = ttk.Frame(tab3)
+        frame22.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        dimmingmodeframe = ttk.LabelFrame(frame22, text="Dimming Mode", labelanchor='n')
+        dimmingmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        dimmingmodelineradiobutton = ttk.Radiobutton(dimmingmodeframe, text='Line', value=26)
+        dimmingmodelineradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        dimmingmodehistradiobutton = ttk.Radiobutton(dimmingmodeframe, text='Hist', value=27)
+        dimmingmodehistradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        dimmingmodemixradiobutton = ttk.Radiobutton(dimmingmodeframe, text='Mix', value=28)
+        dimmingmodemixradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ideenhanceframe = ttk.LabelFrame(frame22, text="IDE Enhance", labelanchor='n')
+        ideenhanceframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        ideenhanceonradiobutton = ttk.Radiobutton(ideenhanceframe, text='On', value=29)
+        ideenhanceonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ideenhanceoffradiobutton = ttk.Radiobutton(ideenhanceframe, text='Off', value=30)
+        ideenhanceoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame23 = ttk.Frame(tab3)
+        frame23.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        partitiondimmingframe = ttk.LabelFrame(frame23, text="Partition Dimming", labelanchor='n')
+        partitiondimmingframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        dimmingmodelineradiobutton = ttk.Radiobutton(partitiondimmingframe, text='On', value=31)
+        dimmingmodelineradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        dimmingmodehistradiobutton = ttk.Radiobutton(partitiondimmingframe, text='Off', value=32)
+        dimmingmodehistradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        dimmingmodemixradiobutton = ttk.Radiobutton(partitiondimmingframe, text='Mix', value=33)
+        dimmingmodemixradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        ddedenoiselevelframe = ttk.LabelFrame(frame23, text="IDE Denoise Level", labelanchor='n')
+        ddedenoiselevelframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        ddedenoiselevelscale = Tkinter.Scale(ddedenoiselevelframe, from_=0, to=9, orient="horizontal")
+        ddedenoiselevelscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame24 = ttk.Frame(tab3)
+        frame24.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        y8correctframe = ttk.LabelFrame(frame24, text="Y8 Correct", labelanchor='n')
+        y8correctframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        y8correctonradiobutton = ttk.Radiobutton(y8correctframe, text='On', value=34)
+        y8correctonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        y8correctoffradiobutton = ttk.Radiobutton(y8correctframe, text='Off', value=35)
+        y8correctoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        idefilterlevelframe = ttk.LabelFrame(frame24, text="IDE Filter Level", labelanchor='n')
+        idefilterlevelframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        idefilterlevelscale = Tkinter.Scale(idefilterlevelframe, from_=0, to=3, orient="horizontal")
+        idefilterlevelscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame25 = ttk.Frame(tab3)
+        frame25.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        brightframe = ttk.LabelFrame(frame25, text="Bright", labelanchor='n')
+        brightframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        brightscale = Tkinter.Scale(brightframe, from_=0, to=100, orient="horizontal")
+        brightscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+
+        idedetailgainframe = ttk.LabelFrame(frame25, text="IDE Detail Gain", labelanchor='n')
+        idedetailgainframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        idedetailgainscale = Tkinter.Scale(idedetailgainframe, from_=0, to=64, orient="horizontal")
+        idedetailgainscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame26 = ttk.Frame(tab3)
+        frame26.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        contrastframe = ttk.LabelFrame(frame26, text="Contrast", labelanchor='n')
+        contrastframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        contrastscale = Tkinter.Scale(contrastframe, from_=0, to=100, orient="horizontal")
+        contrastscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame27 = ttk.Frame(tab4)
+        frame27.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        zoomminusbutton = ttk.Button(frame27, text="Zoom -", state="normal", command=self.set)
+        zoomminusbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        zoomplusbutton = ttk.Button(frame27, text="Zoom +", state="normal", command=self.set)
+        zoomplusbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame28 = ttk.Frame(tab4)
+        frame28.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        focusminusbutton = ttk.Button(frame28, text="Focus -", state="normal", command=self.set)
+        focusminusbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        focusplusbutton = ttk.Button(frame28, text="Focus +", state="normal", command=self.set)
+        focusplusbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        focusautobutton = ttk.Button(frame28, text="AutoFocus", state="normal", command=self.set)
+        focusautobutton.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame29 = ttk.Frame(tab4)
+        frame29.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        viewminusbutton = ttk.Button(frame29, text="View -", state="normal", command=self.set)
+        viewminusbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        viewplusbutton = ttk.Button(frame29, text="View +", state="normal", command=self.set)
+        viewplusbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame30 = ttk.Frame(tab4)
+        frame30.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        widviewbutton = ttk.Button(frame30, text="WidView", state="normal", command=self.set)
+        widviewbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        midviewbutton = ttk.Button(frame30, text="MidView", state="normal", command=self.set)
+        midviewbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        narviewbutton = ttk.Button(frame30, text="NarView", state="normal", command=self.set)
+        narviewbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame31 = ttk.Frame(tab4)
+        frame31.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        serialapplyframe = ttk.LabelFrame(frame31, text="Serial Apply", labelanchor='n')
+        serialapplyframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        serialapplymainradiobutton = ttk.Radiobutton(serialapplyframe, text='Main', value=36)
+        serialapplymainradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        serialapplyservoradiobutton = ttk.Radiobutton(serialapplyframe, text='Servo', value=37)
+        serialapplyservoradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame32 = ttk.Frame(tab4)
+        frame32.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        focuspositionlabel = ttk.Label(frame32, text="Focus Position = ")
+        focuspositionlabel.pack(side="top", fill="x", pady=2, padx=2)
+
+        autofocusstatuslabel = ttk.Label(frame32, text="AutoFocus Status = ")
+        autofocusstatuslabel.pack(side="top", fill="x", pady=2, padx=2)
+
+
+        frame33 = ttk.Frame(tab5)
+        frame33.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        intgearmodeframe = ttk.LabelFrame(frame33, text="INT Gear Mode", labelanchor='n')
+        intgearmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        intgearmodemanualradiobutton = ttk.Radiobutton(intgearmodeframe, text='Manual', value=38)
+        intgearmodemanualradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        intgearmodesemiradiobutton = ttk.Radiobutton(intgearmodeframe, text='Semi', value=39)
+        intgearmodesemiradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        intgearmodeautoradiobutton = ttk.Radiobutton(intgearmodeframe, text='Auto', value=40)
+        intgearmodeautoradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        basegearmodeframe = ttk.LabelFrame(frame33, text="Base Gear Mode", labelanchor='n')
+        basegearmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        basegearmodemanualradiobutton = ttk.Radiobutton(basegearmodeframe, text='Manual', value=41)
+        basegearmodemanualradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        basegearmodeautoradiobutton = ttk.Radiobutton(basegearmodeframe, text='Auto', value=42)
+        basegearmodeautoradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame34 = ttk.Frame(tab5)
+        frame34.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        intgearframe = ttk.LabelFrame(frame34, text="INT Gear", labelanchor='n')
+        intgearframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        intgearlowradiobutton = ttk.Radiobutton(intgearframe, text='Low', value=43)
+        intgearlowradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        intgearnorradiobutton = ttk.Radiobutton(intgearframe, text='Nor', value=44)
+        intgearnorradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        intgearhighradiobutton = ttk.Radiobutton(intgearframe, text='High', value=45)
+        intgearhighradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        basegearframe = ttk.LabelFrame(frame34, text="Base Gear", labelanchor='n')
+        basegearframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        basegearlowradiobutton = ttk.Radiobutton(basegearframe, text='Low', value=46)
+        basegearlowradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        basegearnorradiobutton = ttk.Radiobutton(basegearframe, text='Nor', value=47)
+        basegearnorradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+        basegearhighradiobutton = ttk.Radiobutton(basegearframe, text='High', value=48)
+        basegearhighradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+
+
+        frame35 = ttk.Frame(tab5)
+        frame35.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        b1frame = ttk.LabelFrame(frame35, text="B1", labelanchor='n')
+        b1frame.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame36 = ttk.Frame(b1frame)
+        frame36.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        captureb1button = ttk.Button(frame36, text="Capture", state="normal", command=self.connect)
+        captureb1button.pack(side="left", fill="x", pady=2, padx=2)
+
+        savebbutton = ttk.Button(frame36, text="Save B", state="normal", command=self.connect)
+        savebbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        frame37 = ttk.Frame(b1frame)
+        frame37.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        loadbbutton = ttk.Button(frame37, text="Load B", state="normal", command=self.connect)
+        loadbbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        clearbbutton = ttk.Button(frame37, text="Clear B", state="normal", command=self.connect)
+        clearbbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        b2frame = ttk.LabelFrame(frame35, text="B2", labelanchor='n')
+        b2frame.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame38 = ttk.Frame(b2frame)
+        frame38.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        captureb2button = ttk.Button(frame38, text="Capture", state="normal", command=self.connect)
+        captureb2button.pack(side="left", fill="x", pady=2, padx=2)
+
+        savekbutton = ttk.Button(frame38, text="Save K", state="normal", command=self.connect)
+        savekbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        frame39 = ttk.Frame(b2frame)
+        frame39.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        loadkbutton = ttk.Button(frame39, text="Load K", state="normal", command=self.connect)
+        loadkbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        clearkbutton = ttk.Button(frame39, text="Clear K", state="normal", command=self.connect)
+        clearkbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+
+        frame40 = ttk.Frame(tab5)
+        frame40.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        deltbframe = ttk.LabelFrame(frame40, text="DeltB", labelanchor='n')
+        deltbframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame41 = ttk.Frame(deltbframe)
+        frame41.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        capturedeltbbutton = ttk.Button(frame41, text="Capture", state="normal", command=self.connect)
+        capturedeltbbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        savedeltbbutton = ttk.Button(frame41, text="Save", state="normal", command=self.connect)
+        savedeltbbutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        frame42 = ttk.Frame(deltbframe)
+        frame42.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        loaddeltbbutton = ttk.Button(frame42, text="Load", state="normal", command=self.connect)
+        loaddeltbbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        compensationframe = ttk.LabelFrame(frame40, text="Compensation", labelanchor='n')
+        compensationframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+
+        frame43 = ttk.Frame(compensationframe)
+        frame43.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        shutterbutton = ttk.Button(frame43, text="Shutter", state="normal", command=self.connect)
+        shutterbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        scencebutton = ttk.Button(frame43, text="Scence", state="normal", command=self.connect)
+        scencebutton.pack(side="right", fill="x", pady=2, padx=2)
+
+        frame44 = ttk.Frame(compensationframe)
+        frame44.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        virtualbutton = ttk.Button(frame44, text="Virtual", state="normal", command=self.connect)
+        virtualbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+
+        frame45 = ttk.Frame(tab5)
+        frame45.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
+
+        intframe = ttk.LabelFrame(frame45, text="INT", labelanchor='n')
+        intframe.pack(side="left", fill="both", pady=2, padx=2)
+
+        intspin = Tkinter.Spinbox(intframe, from_=1, to=1000, increment=1, width=13, justify="center")
+        intspin.pack(side="left", fill="x", pady=2, padx=2)
+
+        intcombolist = ["ms", "us"]
+        intcombo = ttk.Combobox(intframe, values=intcombolist, state='readonly', justify="center")
+        intcombo.pack(side="left", fill="x", pady=2, padx=2)
+
+        intsetbutton = ttk.Button(intframe, text="Set", state="normal", command=self.connect)
+        intsetbutton.pack(side="left", fill="x", pady=2, padx=2)
+
+        print("Start GUI ...")
+        root.mainloop()
+
+    def connect(self):
+        pass
+
+    def set(self):
+        pass
+
+    def save(self):
+        pass
+
+    def reset(self):
+        pass
+
+
+if __name__ == "__main__":
+    GavinGui()
+    print("Done")
