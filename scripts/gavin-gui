@@ -1,41 +1,23 @@
-#! /usr/bin/env python
-# -*- coding: utf-8 -*-
+#! /usr/bin/env python3
 
 import logging
-import os
+import tkinter as tk
+from tkinter import ttk
 
-
-if os.name == 'nt':                                 # sys.platform == 'win32':
-    from serial.tools.list_ports_windows import comports
-elif os.name == 'posix':
-    from serial.tools.list_ports_linux import SysFS
-    import glob
-
-    def comports():
-        devices = glob.glob('/dev/ttyS*')           # built-in serial ports
-        devices.extend(glob.glob('/dev/ttyUSB*'))   # usb-serial with own driver
-        devices.extend(glob.glob('/dev/ttyMI*'))    # MOXA serial devices
-        return [info
-                for info in [SysFS(d) for d in devices]
-                if info.subsystem != "platform"]    # hide non-present internal serial ports
-
-
-try:
-    import tkinter as Tkinter       # for Python3
-    from tkinter import ttk
-except ImportError:
-    import Tkinter                  # for Python2
-    import ttk
-
+from gavin.protocol import make_command
+from serial import Serial
+from serial.tools.list_ports_windows import comports
 
 logging.basicConfig(level=logging.INFO)
 
 
-class GavinGui(object):
+class GavinGui:
     def __init__(self):
-        root = Tkinter.Tk()
+        root = tk.Tk()
         root.title("Cooled Standard Module Controller")
-        root.resizable(False, False)
+        root.resizable(width=False, height=False)
+
+        self.socket = None
 
         tabs = ttk.Notebook(root)
 
@@ -46,12 +28,12 @@ class GavinGui(object):
         tab5 = ttk.Frame(tabs)
         tab6 = ttk.Frame(tabs)
 
-        tabs.add(tab1, text='Setting')
-        tabs.add(tab2, text='Video')
-        tabs.add(tab3, text='Algorithm')
-        tabs.add(tab4, text='Optics')
-        tabs.add(tab5, text='NUC')
-        tabs.add(tab6, text='Upgrade')
+        tabs.add(tab1, text="Setting")
+        tabs.add(tab2, text="Video")
+        tabs.add(tab3, text="Algorithm")
+        tabs.add(tab4, text="Optics")
+        tabs.add(tab5, text="NUC")
+        tabs.add(tab6, text="Upgrade")
 
         tabs.pack(expand=False, fill="both")
 
@@ -59,19 +41,21 @@ class GavinGui(object):
         frame1 = ttk.Frame(tab1)
         frame1.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        portframe = ttk.LabelFrame(frame1, text="Serial Port", labelanchor='n')
+        portframe = ttk.LabelFrame(frame1, text="Serial Port", labelanchor="n")
         portframe.pack(side="left", fill="both", pady=2, padx=2)
 
+        self.portnamevar = tk.StringVar()
         iterator = sorted(comports())
         portlist = [port for n, (port, desc, hwid) in enumerate(iterator, 1)]
-        portcombo = ttk.Combobox(portframe, values=portlist, state='readonly', justify="center")
+        portcombo = ttk.Combobox(portframe, values=portlist, textvariable=self.portnamevar, state="readonly", justify="center")
         portcombo.pack(side="top", fill="x", pady=2, padx=2)
 
-        baudrateframe = ttk.LabelFrame(frame1, text="Baudrate", labelanchor='n')
+        baudrateframe = ttk.LabelFrame(frame1, text="Baudrate", labelanchor="n")
         baudrateframe.pack(side="left", fill="both", pady=2, padx=2)
 
+        self.baudratevar = tk.IntVar()
         baudratelist = [9600, 19200, 38400, 115200]
-        baudratecombo = ttk.Combobox(baudrateframe, values=baudratelist, state='readonly', justify="center")
+        baudratecombo = ttk.Combobox(baudrateframe, values=baudratelist, textvariable=self.baudratevar, state="readonly", justify="center")
         baudratecombo.pack(side="top", fill="x", pady=2, padx=2)
 
         connectbutton = ttk.Button(frame1, text="Connect", state="normal", command=self.connect)
@@ -81,61 +65,69 @@ class GavinGui(object):
         frame2 = ttk.Frame(tab1)
         frame2.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        framerateframe = ttk.LabelFrame(frame2, text="Frame Rate", labelanchor='n')
+        framerateframe = ttk.LabelFrame(frame2, text="Frame Rate", labelanchor="n")
         framerateframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        frameratespin = Tkinter.Spinbox(framerateframe, from_=1, to=100, increment=1, width=13, justify="center")
+        self.frameratevar = tk.IntVar()
+        frameratespin = tk.Spinbox(framerateframe, textvariable=self.frameratevar, from_=1, to=100, increment=1, width=13, justify="center")
         frameratespin.pack(side="left", fill="x", pady=2, padx=2)
 
-        setbutton = ttk.Button(framerateframe, text="Set", state="normal", command=self.set)
+        setbutton = ttk.Button(framerateframe, text="Set", state="normal", command=self.set_frame_rate)
         setbutton.pack(side="right", fill="x", pady=2, padx=2)
 
-        testimageframe = ttk.LabelFrame(frame2, text="Test Image", labelanchor='n')
+        testimageframe = ttk.LabelFrame(frame2, text="Test Image", labelanchor="n")
         testimageframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        testimagelist = ['RealTime', 'Test1', 'Test2', 'Test3', 'Test4', 'Test5', 'Test6', 'Test7']
-        testimagecombo = ttk.Combobox(testimageframe, values=testimagelist, state='readonly', justify="center")
+        self.testimagevar = tk.StringVar()
+        testimagelist = ["RealTime", "Checkboard", "Horizontal", "Half", "Rolling", "Simulation", "Vertical", "Incremental"]
+        testimagecombo = ttk.Combobox(testimageframe, values=testimagelist, textvariable=self.testimagevar, state="readonly", justify="center")
         testimagecombo.pack(side="top", fill="x", pady=2, padx=2)
+        testimagecombo.bind("<<ComboboxSelected>>", lambda event: self.select_test_image(event))
 
 
         frame3 = ttk.Frame(tab1)
         frame3.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        synmodeframe = ttk.LabelFrame(frame3, text="Syn Mode", labelanchor='n')
+        synmodeframe = ttk.LabelFrame(frame3, text="Syn Mode", labelanchor="n")
         synmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        synmoderadiobutton1 = ttk.Radiobutton(synmodeframe, text='In', value=1)
+        self.synmodevar = tk.IntVar()
+        synmoderadiobutton1 = ttk.Radiobutton(synmodeframe, text="In", variable=self.synmodevar, value=1, command=self.change_syn_mode)
         synmoderadiobutton1.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        synmoderadiobutton2 = ttk.Radiobutton(synmodeframe, text='Out', value=2)
+        synmoderadiobutton2 = ttk.Radiobutton(synmodeframe, text="Out", variable=self.synmodevar, value=2, command=self.change_syn_mode)
         synmoderadiobutton2.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        synmoderadiobutton3 = ttk.Radiobutton(synmodeframe, text='Auto', value=3)
+        synmoderadiobutton3 = ttk.Radiobutton(synmodeframe, text="Auto", variable=self.synmodevar, value=3, command=self.change_syn_mode)
         synmoderadiobutton3.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        observationmodeframe = ttk.LabelFrame(frame3, text="Observation Mode", labelanchor='n')
+        observationmodeframe = ttk.LabelFrame(frame3, text="Observation Mode", labelanchor="n")
         observationmodeframe.pack(side="left", fill="both", pady=2, padx=2)
 
-        observationmodelist = ['Advanced', 'Gain1', 'Gain2', 'Gain3', 'Gain4']
-        observationmodecombo = ttk.Combobox(observationmodeframe, values=observationmodelist, state='readonly', justify="center")
+        self.observationmodevar = tk.StringVar()
+        observationmodelist = ["Advanced", "Gain1", "Gain2", "Gain3", "Gain4"]
+        observationmodecombo = ttk.Combobox(observationmodeframe, values=observationmodelist, textvariable=self.observationmodevar, state="readonly", justify="center")
         observationmodecombo.pack(side="left", fill="x", pady=2, padx=2)
+        observationmodecombo.bind("<<ComboboxSelected>>", lambda event: self.select_observation_mode(event))
 
 
         frame4 = ttk.Frame(tab1)
         frame4.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        systemtempriseframe = ttk.LabelFrame(frame4, text="System Temp Rise", labelanchor='n')
+        systemtempriseframe = ttk.LabelFrame(frame4, text="System Temp Rise", labelanchor="n")
         systemtempriseframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        systemtemprisescale = Tkinter.Scale(systemtempriseframe, from_=0, to=50, orient="horizontal")
+        systemtemprisescale = tk.Scale(systemtempriseframe, from_=0, to=50, orient="horizontal", command=lambda value: self.set_system_temp(value))
         systemtemprisescale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        intintensityframe = ttk.LabelFrame(frame4, text="INT Intensity", labelanchor='n')
+        intintensityframe = ttk.LabelFrame(frame4, text="INT Intensity", labelanchor="n")
         intintensityframe.pack(side="left", fill="both", pady=2, padx=2)
 
-        intintensitylist = ['Auto', 'Gain1', 'Gain2', 'Gain3']
-        intintensitycombo = ttk.Combobox(intintensityframe, values=intintensitylist, state='readonly', justify="center")
+        self.intintensityvar = tk.StringVar()
+        intintensitylist = ["Auto", "Gain1", "Gain2", "Gain3"]
+        intintensitycombo = ttk.Combobox(intintensityframe, values=intintensitylist, textvariable=self.intintensityvar, state="readonly", justify="center")
         intintensitycombo.pack(side="left", fill="x", pady=2, padx=2)
+        intintensitycombo.bind("<<ComboboxSelected>>", lambda event: self.select_int_intensity(event))
 
 
         frame5 = ttk.Frame(tab1)
@@ -167,96 +159,105 @@ class GavinGui(object):
         frame7 = ttk.Frame(tab2)
         frame7.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        imagesourcemodeframe = ttk.LabelFrame(frame7, text="Image Source Mode", labelanchor='n')
+        imagesourcemodeframe = ttk.LabelFrame(frame7, text="Image Source Mode", labelanchor="n")
         imagesourcemodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        ismyradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='Y', value=4)
+        self.ismodevar = tk.IntVar()
+        ismyradiobutton = ttk.Radiobutton(imagesourcemodeframe, text="Y", variable=self.ismodevar, value=4, command=self.change_source_mode)
         ismyradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ismxradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='X', value=5)
+        ismxradiobutton = ttk.Radiobutton(imagesourcemodeframe, text="X", variable=self.ismodevar, value=5, command=self.change_source_mode)
         ismxradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ismkradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='K', value=6)
+        ismkradiobutton = ttk.Radiobutton(imagesourcemodeframe, text="K", variable=self.ismodevar, value=6, command=self.change_source_mode)
         ismkradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ismbradiobutton = ttk.Radiobutton(imagesourcemodeframe, text='B', value=7)
+        ismbradiobutton = ttk.Radiobutton(imagesourcemodeframe, text="B", variable=self.ismodevar, value=7, command=self.change_source_mode)
         ismbradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        lvdsvideomodeframe = ttk.LabelFrame(frame7, text="LVDS Video Mode", labelanchor='n')
+        lvdsvideomodeframe = ttk.LabelFrame(frame7, text="LVDS Video Mode", labelanchor="n")
         lvdsvideomodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        lvdsvmy16radiobutton = ttk.Radiobutton(lvdsvideomodeframe, text='Y16', value=8)
+        self.lvdsvideomodevar = tk.IntVar()
+        lvdsvmy16radiobutton = ttk.Radiobutton(lvdsvideomodeframe, text="Y16", variable=self.lvdsvideomodevar, value=8, command=self.change_video_mode)
         lvdsvmy16radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        lvdsvmy8radiobutton = ttk.Radiobutton(lvdsvideomodeframe, text='Y8', value=9)
+        lvdsvmy8radiobutton = ttk.Radiobutton(lvdsvideomodeframe, text="Y8", variable=self.lvdsvideomodevar, value=9, command=self.change_video_mode)
         lvdsvmy8radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        lvdsvmxradiobutton = ttk.Radiobutton(lvdsvideomodeframe, text='K', value=10)
+        lvdsvmxradiobutton = ttk.Radiobutton(lvdsvideomodeframe, text="X", variable=self.lvdsvideomodevar, value=10, command=self.change_video_mode)
         lvdsvmxradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
         frame8 = ttk.Frame(tab2)
         frame8.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        mirrorframe = ttk.LabelFrame(frame8, text="Mirror", labelanchor='n')
+        mirrorframe = ttk.LabelFrame(frame8, text="Mirror", labelanchor="n")
         mirrorframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        mirrornoneradiobutton = ttk.Radiobutton(mirrorframe, text='None', value=11)
+        self.mirrorvar = tk.IntVar()
+        mirrornoneradiobutton = ttk.Radiobutton(mirrorframe, text="None", variable=self.mirrorvar, value=11, command=self.change_mirror_mode)
         mirrornoneradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        mirrorxradiobutton = ttk.Radiobutton(mirrorframe, text='X', value=12)
+        mirrorxradiobutton = ttk.Radiobutton(mirrorframe, text="X", variable=self.mirrorvar, value=12, command=self.change_mirror_mode)
         mirrorxradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        mirroryradiobutton = ttk.Radiobutton(mirrorframe, text='Y', value=13)
+        mirroryradiobutton = ttk.Radiobutton(mirrorframe, text="Y", variable=self.mirrorvar, value=13, command=self.change_mirror_mode)
         mirroryradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        mirrorxyradiobutton = ttk.Radiobutton(mirrorframe, text='XY', value=14)
+        mirrorxyradiobutton = ttk.Radiobutton(mirrorframe, text="XY", variable=self.mirrorvar, value=14, command=self.change_mirror_mode)
         mirrorxyradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        zoomframe = ttk.LabelFrame(frame8, text="Zoom", labelanchor='n')
+        zoomframe = ttk.LabelFrame(frame8, text="Zoom", labelanchor="n")
         zoomframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        zoomx1radiobutton = ttk.Radiobutton(zoomframe, text='X1', value=15)
+        self.zoomvar = tk.IntVar()
+        zoomx1radiobutton = ttk.Radiobutton(zoomframe, text="X1", variable=self.zoomvar, value=15, command=self.change_zoom_mode)
         zoomx1radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        zoomx2radiobutton = ttk.Radiobutton(zoomframe, text='X2', value=16)
+        zoomx2radiobutton = ttk.Radiobutton(zoomframe, text="X2", variable=self.zoomvar, value=16, command=self.change_zoom_mode)
         zoomx2radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        zoomx4radiobutton = ttk.Radiobutton(zoomframe, text='X4', value=17)
+        zoomx4radiobutton = ttk.Radiobutton(zoomframe, text="X4", variable=self.zoomvar, value=17, command=self.change_zoom_mode)
         zoomx4radiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
         frame9 = ttk.Frame(tab2)
         frame9.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        paletteframe = ttk.LabelFrame(frame9, text="Palette", labelanchor='n')
+        paletteframe = ttk.LabelFrame(frame9, text="Palette", labelanchor="n")
         paletteframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        palettelist = ['WhiteHot', 'BlackHot', 'IronRed', 'HotIron', 'Medical', 'Arctic', 'Rainbow1', 'Rainbow2']
-        palettecombo = ttk.Combobox(paletteframe, values=palettelist, state='readonly', justify="center")
+        self.palettevar = tk.StringVar()
+        palettelist = ["WhiteHot", "Fulgurite", "IronRed", "HotIron", "Medical", "Arctic", "Rainbow1", "Rainbow2"]
+        palettecombo = ttk.Combobox(paletteframe, values=palettelist, textvariable=self.palettevar, state="readonly", justify="center")
         palettecombo.pack(side="top", fill="x", pady=2, padx=2)
+        palettecombo.bind("<<ComboboxSelected>>", lambda event: self.select_palette(event))
 
-        testinfoframe = ttk.LabelFrame(frame9, text="Test Info", labelanchor='n')
+        testinfoframe = ttk.LabelFrame(frame9, text="Test Info", labelanchor="n")
         testinfoframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        testinfolist = ['None', 'Test1', 'Test2', 'Test3']
-        palettecombo = ttk.Combobox(testinfoframe, values=testinfolist, state='readonly', justify="center")
-        palettecombo.pack(side="top", fill="x", pady=2, padx=2)
+        self.testinfovar = tk.StringVar()
+        testinfolist = ["Off", "Test1", "Test2", "Test3"]
+        testinfocombo = ttk.Combobox(testinfoframe, values=testinfolist, textvariable=self.testinfovar, state="readonly", justify="center")
+        testinfocombo.pack(side="top", fill="x", pady=2, padx=2)
+        testinfocombo.bind("<<ComboboxSelected>>", lambda event: self.select_test_info(event))
 
 
         frame10 = ttk.Frame(tab2)
         frame10.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        cursorframe = ttk.LabelFrame(frame10, text="Cursor", labelanchor='n')
+        cursorframe = ttk.LabelFrame(frame10, text="Cursor", labelanchor="n")
         cursorframe.pack(side="left", fill="both", pady=2, padx=2)
 
         frame11 = ttk.Frame(cursorframe)
         frame11.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        cursoronradiobutton = ttk.Radiobutton(frame11, text='On', value=18)
+        self.cursorvar = tk.IntVar()
+        cursoronradiobutton = ttk.Radiobutton(frame11, text="On", variable=self.cursorvar, value=18, command=self.change_cursor_mode)
         cursoronradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        cursoroffradiobutton = ttk.Radiobutton(frame11, text='Off', value=19)
+        cursoroffradiobutton = ttk.Radiobutton(frame11, text="Off", variable=self.cursorvar, value=19, command=self.change_cursor_mode)
         cursoroffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
         frame12 = ttk.Frame(cursorframe)
@@ -265,10 +266,11 @@ class GavinGui(object):
         cursorxlabel = ttk.Label(frame12, text="X")
         cursorxlabel.pack(side="left", fill="x", pady=2, padx=2)
 
-        cursorxspin = Tkinter.Spinbox(frame12, from_=1, to=1000, increment=1, width=13, justify="center")
+        self.cursorxvar = tk.IntVar()
+        cursorxspin = tk.Spinbox(frame12, textvariable=self.cursorxvar, from_=1, to=1000, increment=1, width=13, justify="center")
         cursorxspin.pack(side="left", fill="x", pady=2, padx=2)
 
-        cursorxsetbutton = ttk.Button(frame12, text="Set", state="normal", command=self.set)
+        cursorxsetbutton = ttk.Button(frame12, text="Set", state="normal", command=self.set_cursor_x)
         cursorxsetbutton.pack(side="right", fill="x", pady=2, padx=2)
 
         frame13 = ttk.Frame(cursorframe)
@@ -277,229 +279,238 @@ class GavinGui(object):
         cursorylabel = ttk.Label(frame13, text="Y")
         cursorylabel.pack(side="left", fill="x", pady=2, padx=2)
 
-        cursoryspin = Tkinter.Spinbox(frame13, from_=1, to=1000, increment=1, width=13, justify="center")
+        self.cursoryvar = tk.IntVar()
+        cursoryspin = tk.Spinbox(frame13, textvariable=self.cursoryvar, from_=1, to=1000, increment=1, width=13, justify="center")
         cursoryspin.pack(side="left", fill="x", pady=2, padx=2)
 
-        cursorysetbutton = ttk.Button(frame13, text="Set", state="normal", command=self.set)
+        cursorysetbutton = ttk.Button(frame13, text="Set", state="normal", command=self.set_cursor_y)
         cursorysetbutton.pack(side="right", fill="x", pady=2, padx=2)
 
 
         frame14 = ttk.Frame(tab3)
         frame14.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        timefilterframe = ttk.LabelFrame(frame14, text="Time Filter", labelanchor='n')
+        timefilterframe = ttk.LabelFrame(frame14, text="Time Filter", labelanchor="n")
         timefilterframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame15 = ttk.Frame(timefilterframe)
         frame15.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        timefilteronradiobutton = ttk.Radiobutton(frame15, text='On', value=20)
+        self.timefiltervar = tk.IntVar()
+        timefilteronradiobutton = ttk.Radiobutton(frame15, variable=self.timefiltervar, text="On", value=20, command=self.change_time_filter_mode)
         timefilteronradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        timefilteroffradiobutton = ttk.Radiobutton(frame15, text='Off', value=21)
+        timefilteroffradiobutton = ttk.Radiobutton(frame15, variable=self.timefiltervar, text="Off", value=21, command=self.change_time_filter_mode)
         timefilteroffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
         frame16 = ttk.Frame(timefilterframe)
         frame16.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        timefilterscale = Tkinter.Scale(frame16, from_=0, to=94, orient="horizontal")
+        timefilterscale = tk.Scale(frame16, from_=0, to=94, orient="horizontal", command=lambda value: self.set_time_filter(value))
         timefilterscale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        removeverticalstripeframe = ttk.LabelFrame(frame14, text="Remove Vertical Stripe", labelanchor='n')
+        removeverticalstripeframe = ttk.LabelFrame(frame14, text="Remove Vertical Stripe", labelanchor="n")
         removeverticalstripeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame17 = ttk.Frame(removeverticalstripeframe)
         frame17.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        removeverticalstripeonradiobutton = ttk.Radiobutton(frame17, text='On', value=22)
+        self.removestripevar = tk.IntVar()
+        removeverticalstripeonradiobutton = ttk.Radiobutton(frame17, variable=self.removestripevar, text="On", value=22, command=self.change_remove_stripe_mode)
         removeverticalstripeonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        removeverticalstripeoffradiobutton = ttk.Radiobutton(frame17, text='Off', value=23)
+        removeverticalstripeoffradiobutton = ttk.Radiobutton(frame17, variable=self.removestripevar, text="Off", value=23, command=self.change_remove_stripe_mode)
         removeverticalstripeoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
         frame18 = ttk.Frame(removeverticalstripeframe)
         frame18.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        removeverticalstripescale = Tkinter.Scale(frame18, from_=0, to=4, orient="horizontal")
+        removeverticalstripescale = tk.Scale(frame18, from_=0, to=4, orient="horizontal", command=lambda value: self.set_vertical_stripe(value))
         removeverticalstripescale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
         frame19 = ttk.Frame(tab3)
         frame19.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        spacefilterframe = ttk.LabelFrame(frame19, text="Space Filter", labelanchor='n')
+        spacefilterframe = ttk.LabelFrame(frame19, text="Space Filter", labelanchor="n")
         spacefilterframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame20 = ttk.Frame(spacefilterframe)
         frame20.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        spacefilteronradiobutton = ttk.Radiobutton(frame20, text='On', value=24)
+        self.spacefiltervar = tk.IntVar()
+        spacefilteronradiobutton = ttk.Radiobutton(frame20, variable=self.spacefiltervar, text="On", value=24, command=self.change_space_filter_mode)
         spacefilteronradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        spacefilteroffradiobutton = ttk.Radiobutton(frame20, text='Off', value=25)
+        spacefilteroffradiobutton = ttk.Radiobutton(frame20, variable=self.spacefiltervar, text="Off", value=25, command=self.change_space_filter_mode)
         spacefilteroffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
         frame21 = ttk.Frame(spacefilterframe)
         frame21.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        spacefilterscale = Tkinter.Scale(frame21, from_=0, to=9, orient="horizontal")
+        spacefilterscale = tk.Scale(frame21, from_=0, to=9, orient="horizontal", command=lambda value: self.set_space_filter(value))
         spacefilterscale.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ddeframe = ttk.LabelFrame(frame19, text="DDE", labelanchor='n')
+        ddeframe = ttk.LabelFrame(frame19, text="DDE", labelanchor="n")
         ddeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        ddescale = Tkinter.Scale(ddeframe, from_=0, to=15, orient="horizontal")
+        ddescale = tk.Scale(ddeframe, from_=0, to=7, orient="horizontal", command=lambda value: self.set_dde(value))
         ddescale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
 
 
         frame22 = ttk.Frame(tab3)
         frame22.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        dimmingmodeframe = ttk.LabelFrame(frame22, text="Dimming Mode", labelanchor='n')
+        dimmingmodeframe = ttk.LabelFrame(frame22, text="Dimming Mode", labelanchor="n")
         dimmingmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        dimmingmodelineradiobutton = ttk.Radiobutton(dimmingmodeframe, text='Line', value=26)
+        self.dimmingmodevar = tk.IntVar()
+        dimmingmodelineradiobutton = ttk.Radiobutton(dimmingmodeframe, variable=self.dimmingmodevar, text="Line", value=26, command=self.change_dimming_mode)
         dimmingmodelineradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        dimmingmodehistradiobutton = ttk.Radiobutton(dimmingmodeframe, text='Hist', value=27)
+        dimmingmodehistradiobutton = ttk.Radiobutton(dimmingmodeframe, variable=self.dimmingmodevar, text="Hist", value=27, command=self.change_dimming_mode)
         dimmingmodehistradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        dimmingmodemixradiobutton = ttk.Radiobutton(dimmingmodeframe, text='Mix', value=28)
+        dimmingmodemixradiobutton = ttk.Radiobutton(dimmingmodeframe, variable=self.dimmingmodevar, text="Mix", value=28, command=self.change_dimming_mode)
         dimmingmodemixradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ideenhanceframe = ttk.LabelFrame(frame22, text="IDE Enhance", labelanchor='n')
+        ideenhanceframe = ttk.LabelFrame(frame22, text="IDE Enhance", labelanchor="n")
         ideenhanceframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        ideenhanceonradiobutton = ttk.Radiobutton(ideenhanceframe, text='On', value=29)
+        self.ideenhancevar = tk.IntVar()
+        ideenhanceonradiobutton = ttk.Radiobutton(ideenhanceframe, variable=self.ideenhancevar, text="On", value=29, command=self.change_ide_enhance_mode)
         ideenhanceonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ideenhanceoffradiobutton = ttk.Radiobutton(ideenhanceframe, text='Off', value=30)
+        ideenhanceoffradiobutton = ttk.Radiobutton(ideenhanceframe, variable=self.ideenhancevar, text="Off", value=30, command=self.change_ide_enhance_mode)
         ideenhanceoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
         frame23 = ttk.Frame(tab3)
         frame23.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        partitiondimmingframe = ttk.LabelFrame(frame23, text="Partition Dimming", labelanchor='n')
+        partitiondimmingframe = ttk.LabelFrame(frame23, text="Partition Dimming", labelanchor="n")
         partitiondimmingframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        dimmingmodelineradiobutton = ttk.Radiobutton(partitiondimmingframe, text='On', value=31)
-        dimmingmodelineradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+        self.partitiondimmingvar = tk.IntVar()
+        partitiondimmingonradiobutton = ttk.Radiobutton(partitiondimmingframe, variable=self.partitiondimmingvar, text="On", value=31, command=self.change_partition_dimming_mode)
+        partitiondimmingonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        dimmingmodehistradiobutton = ttk.Radiobutton(partitiondimmingframe, text='Off', value=32)
-        dimmingmodehistradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+        partitiondimmingoffradiobutton = ttk.Radiobutton(partitiondimmingframe, variable=self.partitiondimmingvar, text="Off", value=32, command=self.change_partition_dimming_mode)
+        partitiondimmingoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        dimmingmodemixradiobutton = ttk.Radiobutton(partitiondimmingframe, text='Mix', value=33)
-        dimmingmodemixradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
+        partitiondimmingmixradiobutton = ttk.Radiobutton(partitiondimmingframe, variable=self.partitiondimmingvar, text="Mix", value=33, command=self.change_partition_dimming_mode)
+        partitiondimmingmixradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        ddedenoiselevelframe = ttk.LabelFrame(frame23, text="IDE Denoise Level", labelanchor='n')
-        ddedenoiselevelframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
+        idedenoiselevelframe = ttk.LabelFrame(frame23, text="IDE Denoise Level", labelanchor="n")
+        idedenoiselevelframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        ddedenoiselevelscale = Tkinter.Scale(ddedenoiselevelframe, from_=0, to=9, orient="horizontal")
-        ddedenoiselevelscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
+        idedenoiselevelscale = tk.Scale(idedenoiselevelframe, from_=0, to=9, orient="horizontal", command=lambda value: self.set_ide_denoise_level(value))
+        idedenoiselevelscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
 
 
         frame24 = ttk.Frame(tab3)
         frame24.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        y8correctframe = ttk.LabelFrame(frame24, text="Y8 Correct", labelanchor='n')
+        y8correctframe = ttk.LabelFrame(frame24, text="Y8 Correct", labelanchor="n")
         y8correctframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        y8correctonradiobutton = ttk.Radiobutton(y8correctframe, text='On', value=34)
+        self.y8correctvar = tk.IntVar()
+        y8correctonradiobutton = ttk.Radiobutton(y8correctframe, variable=self.y8correctvar, text="On", value=34, command=self.change_y8_correct_mode)
         y8correctonradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        y8correctoffradiobutton = ttk.Radiobutton(y8correctframe, text='Off', value=35)
+        y8correctoffradiobutton = ttk.Radiobutton(y8correctframe, variable=self.y8correctvar, text="Off", value=35, command=self.change_y8_correct_mode)
         y8correctoffradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        idefilterlevelframe = ttk.LabelFrame(frame24, text="IDE Filter Level", labelanchor='n')
+        idefilterlevelframe = ttk.LabelFrame(frame24, text="IDE Filter Level", labelanchor="n")
         idefilterlevelframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        idefilterlevelscale = Tkinter.Scale(idefilterlevelframe, from_=0, to=3, orient="horizontal")
+        idefilterlevelscale = tk.Scale(idefilterlevelframe, from_=0, to=3, orient="horizontal", command=lambda value: self.set_ide_filter_level(value))
         idefilterlevelscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
 
 
         frame25 = ttk.Frame(tab3)
         frame25.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        brightframe = ttk.LabelFrame(frame25, text="Bright", labelanchor='n')
+        brightframe = ttk.LabelFrame(frame25, text="Bright", labelanchor="n")
         brightframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        brightscale = Tkinter.Scale(brightframe, from_=0, to=100, orient="horizontal")
+        brightscale = tk.Scale(brightframe, from_=0, to=100, orient="horizontal", command=lambda value: self.set_bright(value))
         brightscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
 
-        idedetailgainframe = ttk.LabelFrame(frame25, text="IDE Detail Gain", labelanchor='n')
+        idedetailgainframe = ttk.LabelFrame(frame25, text="IDE Detail Gain", labelanchor="n")
         idedetailgainframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        idedetailgainscale = Tkinter.Scale(idedetailgainframe, from_=0, to=64, orient="horizontal")
+        idedetailgainscale = tk.Scale(idedetailgainframe, from_=0, to=64, orient="horizontal", command=lambda value: self.set_ide_detail_gain(value))
         idedetailgainscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
 
 
         frame26 = ttk.Frame(tab3)
         frame26.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        contrastframe = ttk.LabelFrame(frame26, text="Contrast", labelanchor='n')
+        contrastframe = ttk.LabelFrame(frame26, text="Contrast", labelanchor="n")
         contrastframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        contrastscale = Tkinter.Scale(contrastframe, from_=0, to=100, orient="horizontal")
+        contrastscale = tk.Scale(contrastframe, from_=0, to=100, orient="horizontal", command=lambda value: self.set_contrast(value))
         contrastscale.pack(side="top", fill="x", pady=2, padx=2, expand=True)
 
 
         frame27 = ttk.Frame(tab4)
         frame27.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        zoomminusbutton = ttk.Button(frame27, text="Zoom -", state="normal", command=self.set)
+        zoomminusbutton = ttk.Button(frame27, text="Zoom -", state="normal", command=self.zoom_minus)
         zoomminusbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        zoomplusbutton = ttk.Button(frame27, text="Zoom +", state="normal", command=self.set)
+        zoomplusbutton = ttk.Button(frame27, text="Zoom +", state="normal", command=self.zoom_plus)
         zoomplusbutton.pack(side="left", fill="x", pady=2, padx=2)
 
 
         frame28 = ttk.Frame(tab4)
         frame28.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        focusminusbutton = ttk.Button(frame28, text="Focus -", state="normal", command=self.set)
+        focusminusbutton = ttk.Button(frame28, text="Focus -", state="normal", command=self.focus_minus)
         focusminusbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        focusplusbutton = ttk.Button(frame28, text="Focus +", state="normal", command=self.set)
+        focusplusbutton = ttk.Button(frame28, text="Focus +", state="normal", command=self.focus_plus)
         focusplusbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        focusautobutton = ttk.Button(frame28, text="AutoFocus", state="normal", command=self.set)
+        focusautobutton = ttk.Button(frame28, text="AutoFocus", state="normal", command=self.focus_auto)
         focusautobutton.pack(side="left", fill="x", pady=2, padx=2)
 
 
         frame29 = ttk.Frame(tab4)
         frame29.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        viewminusbutton = ttk.Button(frame29, text="View -", state="normal", command=self.set)
+        viewminusbutton = ttk.Button(frame29, text="View -", state="normal", command=self.view_minus)
         viewminusbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        viewplusbutton = ttk.Button(frame29, text="View +", state="normal", command=self.set)
+        viewplusbutton = ttk.Button(frame29, text="View +", state="normal", command=self.view_plus)
         viewplusbutton.pack(side="left", fill="x", pady=2, padx=2)
 
 
         frame30 = ttk.Frame(tab4)
         frame30.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        widviewbutton = ttk.Button(frame30, text="WidView", state="normal", command=self.set)
+        widviewbutton = ttk.Button(frame30, text="WidView", state="normal", command=self.wide_view)
         widviewbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        midviewbutton = ttk.Button(frame30, text="MidView", state="normal", command=self.set)
+        midviewbutton = ttk.Button(frame30, text="MidView", state="normal", command=self.medium_view)
         midviewbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        narviewbutton = ttk.Button(frame30, text="NarView", state="normal", command=self.set)
+        narviewbutton = ttk.Button(frame30, text="NarView", state="normal", command=self.narrow_view)
         narviewbutton.pack(side="left", fill="x", pady=2, padx=2)
 
 
         frame31 = ttk.Frame(tab4)
         frame31.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        serialapplyframe = ttk.LabelFrame(frame31, text="Serial Apply", labelanchor='n')
+        serialapplyframe = ttk.LabelFrame(frame31, text="Serial Apply", labelanchor="n")
         serialapplyframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        serialapplymainradiobutton = ttk.Radiobutton(serialapplyframe, text='Main', value=36)
+        self.serialapplyvar = tk.IntVar()
+        serialapplymainradiobutton = ttk.Radiobutton(serialapplyframe, variable=self.serialapplyvar, text="Main", value=36, command=self.change_serial_apply_mode)
         serialapplymainradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        serialapplyservoradiobutton = ttk.Radiobutton(serialapplyframe, text='Servo', value=37)
+        serialapplyservoradiobutton = ttk.Radiobutton(serialapplyframe, variable=self.serialapplyvar, text="Servo", value=37, command=self.change_serial_apply_mode)
         serialapplyservoradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
@@ -516,174 +527,450 @@ class GavinGui(object):
         frame33 = ttk.Frame(tab5)
         frame33.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        intgearmodeframe = ttk.LabelFrame(frame33, text="INT Gear Mode", labelanchor='n')
+        intgearmodeframe = ttk.LabelFrame(frame33, text="INT Gear Mode", labelanchor="n")
         intgearmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        intgearmodemanualradiobutton = ttk.Radiobutton(intgearmodeframe, text='Manual', value=38)
+        self.intgearmodevar = tk.IntVar()
+        intgearmodemanualradiobutton = ttk.Radiobutton(intgearmodeframe, variable=self.intgearmodevar, text="Manual", value=38, command=self.change_int_gear_mode)
         intgearmodemanualradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        intgearmodesemiradiobutton = ttk.Radiobutton(intgearmodeframe, text='Semi', value=39)
+        intgearmodesemiradiobutton = ttk.Radiobutton(intgearmodeframe, variable=self.intgearmodevar, text="Semi", value=39, command=self.change_int_gear_mode)
         intgearmodesemiradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        intgearmodeautoradiobutton = ttk.Radiobutton(intgearmodeframe, text='Auto', value=40)
+        intgearmodeautoradiobutton = ttk.Radiobutton(intgearmodeframe, variable=self.intgearmodevar, text="Auto", value=40, command=self.change_int_gear_mode)
         intgearmodeautoradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        basegearmodeframe = ttk.LabelFrame(frame33, text="Base Gear Mode", labelanchor='n')
+        basegearmodeframe = ttk.LabelFrame(frame33, text="Base Gear Mode", labelanchor="n")
         basegearmodeframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        basegearmodemanualradiobutton = ttk.Radiobutton(basegearmodeframe, text='Manual', value=41)
+        self.basegearmodevar = tk.IntVar()
+        basegearmodemanualradiobutton = ttk.Radiobutton(basegearmodeframe, variable=self.basegearmodevar, text="Manual", value=41, command=self.change_base_gear_mode)
         basegearmodemanualradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        basegearmodeautoradiobutton = ttk.Radiobutton(basegearmodeframe, text='Auto', value=42)
+        basegearmodeautoradiobutton = ttk.Radiobutton(basegearmodeframe, variable=self.basegearmodevar, text="Auto", value=42, command=self.change_base_gear_mode)
         basegearmodeautoradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
         frame34 = ttk.Frame(tab5)
         frame34.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        intgearframe = ttk.LabelFrame(frame34, text="INT Gear", labelanchor='n')
+        intgearframe = ttk.LabelFrame(frame34, text="INT Gear", labelanchor="n")
         intgearframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        intgearlowradiobutton = ttk.Radiobutton(intgearframe, text='Low', value=43)
+        self.intgearvar = tk.IntVar()
+        intgearlowradiobutton = ttk.Radiobutton(intgearframe, variable=self.intgearvar, text="Low", value=43, command=self.change_int_gear_temp)
         intgearlowradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        intgearnorradiobutton = ttk.Radiobutton(intgearframe, text='Nor', value=44)
+        intgearnorradiobutton = ttk.Radiobutton(intgearframe, variable=self.intgearvar, text="Nor", value=44, command=self.change_int_gear_temp)
         intgearnorradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        intgearhighradiobutton = ttk.Radiobutton(intgearframe, text='High', value=45)
+        intgearhighradiobutton = ttk.Radiobutton(intgearframe, variable=self.intgearvar, text="High", value=45, command=self.change_int_gear_temp)
         intgearhighradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        basegearframe = ttk.LabelFrame(frame34, text="Base Gear", labelanchor='n')
+        basegearframe = ttk.LabelFrame(frame34, text="Base Gear", labelanchor="n")
         basegearframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
-        basegearlowradiobutton = ttk.Radiobutton(basegearframe, text='Low', value=46)
+        self.basegearvar = tk.IntVar()
+        basegearlowradiobutton = ttk.Radiobutton(basegearframe, variable=self.basegearvar, text="Low", value=46, command=self.change_base_gear_temp)
         basegearlowradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        basegearnorradiobutton = ttk.Radiobutton(basegearframe, text='Nor', value=47)
+        basegearnorradiobutton = ttk.Radiobutton(basegearframe, variable=self.basegearvar, text="Nor", value=47, command=self.change_base_gear_temp)
         basegearnorradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
-        basegearhighradiobutton = ttk.Radiobutton(basegearframe, text='High', value=48)
+        basegearhighradiobutton = ttk.Radiobutton(basegearframe, variable=self.basegearvar, text="High", value=48, command=self.change_base_gear_temp)
         basegearhighradiobutton.pack(side="left", fill="x", pady=2, padx=2, expand=True)
 
 
         frame35 = ttk.Frame(tab5)
         frame35.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        b1frame = ttk.LabelFrame(frame35, text="B1", labelanchor='n')
+        b1frame = ttk.LabelFrame(frame35, text="B1", labelanchor="n")
         b1frame.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame36 = ttk.Frame(b1frame)
         frame36.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        captureb1button = ttk.Button(frame36, text="Capture", state="normal", command=self.connect)
+        captureb1button = ttk.Button(frame36, text="Capture", state="normal", command=self.b1_capture)
         captureb1button.pack(side="left", fill="x", pady=2, padx=2)
 
-        savebbutton = ttk.Button(frame36, text="Save B", state="normal", command=self.connect)
+        savebbutton = ttk.Button(frame36, text="Save B", state="normal", command=self.b1_save)
         savebbutton.pack(side="right", fill="x", pady=2, padx=2)
 
         frame37 = ttk.Frame(b1frame)
         frame37.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        loadbbutton = ttk.Button(frame37, text="Load B", state="normal", command=self.connect)
+        loadbbutton = ttk.Button(frame37, text="Load B", state="normal", command=self.b1_load)
         loadbbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        clearbbutton = ttk.Button(frame37, text="Clear B", state="normal", command=self.connect)
+        clearbbutton = ttk.Button(frame37, text="Clear B", state="normal", command=self.b1_clear)
         clearbbutton.pack(side="right", fill="x", pady=2, padx=2)
 
-        b2frame = ttk.LabelFrame(frame35, text="B2", labelanchor='n')
+        b2frame = ttk.LabelFrame(frame35, text="B2", labelanchor="n")
         b2frame.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame38 = ttk.Frame(b2frame)
         frame38.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        captureb2button = ttk.Button(frame38, text="Capture", state="normal", command=self.connect)
+        captureb2button = ttk.Button(frame38, text="Capture", state="normal", command=self.b2_capture)
         captureb2button.pack(side="left", fill="x", pady=2, padx=2)
 
-        savekbutton = ttk.Button(frame38, text="Save K", state="normal", command=self.connect)
+        savekbutton = ttk.Button(frame38, text="Save K", state="normal", command=self.b2_save)
         savekbutton.pack(side="right", fill="x", pady=2, padx=2)
 
         frame39 = ttk.Frame(b2frame)
         frame39.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        loadkbutton = ttk.Button(frame39, text="Load K", state="normal", command=self.connect)
+        loadkbutton = ttk.Button(frame39, text="Load K", state="normal", command=self.b2_load)
         loadkbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        clearkbutton = ttk.Button(frame39, text="Clear K", state="normal", command=self.connect)
+        clearkbutton = ttk.Button(frame39, text="Clear K", state="normal", command=self.b2_clear)
         clearkbutton.pack(side="right", fill="x", pady=2, padx=2)
 
 
         frame40 = ttk.Frame(tab5)
         frame40.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        deltbframe = ttk.LabelFrame(frame40, text="DeltB", labelanchor='n')
+        deltbframe = ttk.LabelFrame(frame40, text="DeltB", labelanchor="n")
         deltbframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame41 = ttk.Frame(deltbframe)
         frame41.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        capturedeltbbutton = ttk.Button(frame41, text="Capture", state="normal", command=self.connect)
+        capturedeltbbutton = ttk.Button(frame41, text="Capture", state="normal", command=self.db_capture)
         capturedeltbbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        savedeltbbutton = ttk.Button(frame41, text="Save", state="normal", command=self.connect)
+        savedeltbbutton = ttk.Button(frame41, text="Save", state="normal", command=self.db_save)
         savedeltbbutton.pack(side="right", fill="x", pady=2, padx=2)
 
         frame42 = ttk.Frame(deltbframe)
         frame42.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        loaddeltbbutton = ttk.Button(frame42, text="Load", state="normal", command=self.connect)
+        loaddeltbbutton = ttk.Button(frame42, text="Load", state="normal", command=self.db_load)
         loaddeltbbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        compensationframe = ttk.LabelFrame(frame40, text="Compensation", labelanchor='n')
+        compensationframe = ttk.LabelFrame(frame40, text="Compensation", labelanchor="n")
         compensationframe.pack(side="left", fill="both", pady=2, padx=2, expand=True)
 
         frame43 = ttk.Frame(compensationframe)
         frame43.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        shutterbutton = ttk.Button(frame43, text="Shutter", state="normal", command=self.connect)
+        shutterbutton = ttk.Button(frame43, text="Shutter", state="normal", command=self.comp_shutter)
         shutterbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        scencebutton = ttk.Button(frame43, text="Scence", state="normal", command=self.connect)
+        scencebutton = ttk.Button(frame43, text="Scence", state="normal", command=self.comp_scence)
         scencebutton.pack(side="right", fill="x", pady=2, padx=2)
 
         frame44 = ttk.Frame(compensationframe)
         frame44.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        virtualbutton = ttk.Button(frame44, text="Virtual", state="normal", command=self.connect)
+        virtualbutton = ttk.Button(frame44, text="Virtual", state="normal", command=self.comp_virtual)
         virtualbutton.pack(side="left", fill="x", pady=2, padx=2)
 
 
         frame45 = ttk.Frame(tab5)
         frame45.pack(side="top", fill="x", ipady=2, ipadx=2, pady=2, padx=2)
 
-        intframe = ttk.LabelFrame(frame45, text="INT", labelanchor='n')
+        intframe = ttk.LabelFrame(frame45, text="INT", labelanchor="n")
         intframe.pack(side="left", fill="both", pady=2, padx=2)
 
-        intspin = Tkinter.Spinbox(intframe, from_=1, to=1000, increment=1, width=13, justify="center")
+        self.intvar = tk.IntVar()
+        intspin = tk.Spinbox(intframe, textvariable=self.intvar, from_=1, to=1000, increment=1, width=13, justify="center")
         intspin.pack(side="left", fill="x", pady=2, padx=2)
 
+        self.inttimevar = tk.StringVar()
         intcombolist = ["ms", "us"]
-        intcombo = ttk.Combobox(intframe, values=intcombolist, state='readonly', justify="center")
+        intcombo = ttk.Combobox(intframe, values=intcombolist, textvariable=self.inttimevar, state="readonly", justify="center")
         intcombo.pack(side="left", fill="x", pady=2, padx=2)
 
-        intsetbutton = ttk.Button(intframe, text="Set", state="normal", command=self.connect)
+        intsetbutton = ttk.Button(intframe, text="Set", state="normal", command=self.set_int)
         intsetbutton.pack(side="left", fill="x", pady=2, padx=2)
 
-        print("Start GUI ...")
         root.mainloop()
 
-    def connect(self):
-        pass
+    def _exchange(self, func, arg=None, val=0):
+        self.socket.reset_input_buffer()
+        self.socket.reset_output_buffer()
 
-    def set(self):
-        pass
+        packet = make_command(func, arg, val)
+        self.socket.write(packet)
+        result = self.socket.read(8)
+        print(result)
+
+    def connect(self):
+        if self.socket and self.socket.is_open:
+            self.socket.close()
+        self.socket = Serial(port=self.portnamevar.get(),
+                           baudrate=self.baudratevar.get(),
+                           timeout=1)
+
+    def select_test_image(self, event=None):
+        arg = self.testimagevar.get()
+        self._exchange(func="TEST_SCREEN", arg=arg)
+
+    def set_frame_rate(self):
+        value = self.frameratevar.get()
+        self._exchange(func="FRAME_RATE", val=value * 100)
+
+    def select_observation_mode(self, event=None):
+        arg = self.observationmodevar.get()
+        self._exchange(func="OBS_MODEL", arg=arg)
+
+    def select_int_intensity(self, event=None):
+        arg = self.intintensityvar.get()
+        self._exchange(func="INT_STRENGTH", arg=arg)
+
+    def set_system_temp(self, value):
+        self._exchange(func="SYS_TEMP", val=int(value))
 
     def save(self):
-        pass
+        self._exchange(func="SAVE_SETTINGS")
 
     def reset(self):
+        self._exchange(func="RESTORE_FACTORY")
+
+    def change_syn_mode(self):
+        arg = {1: "internal",
+               2: "external",
+               3: "adaptive",
+              }.get(self.synmodevar.get())
+        self._exchange(func="SYNC_MODE", arg=arg)
+
+    def change_source_mode(self):
+        arg = {4: "y",
+               5: "x",
+               6: "k",
+               7: "b",
+              }.get(self.ismodevar.get())
+        self._exchange(func="ANALOG_VIDEO", arg=arg)
+
+    def change_video_mode(self):
+        arg = {8: "y16",
+               9: "y8",
+               10: "x",
+              }.get(self.lvdsvideomodevar.get())
+        self._exchange(func="DIGITAL_VIDEO", arg=arg)
+
+    def change_mirror_mode(self):
+        arg = {11: "off",
+               12: "x",
+               13: "y",
+               14: "xy",
+              }.get(self.mirrorvar.get())
+        self._exchange(func="MIRROR", arg=arg)
+
+    def change_zoom_mode(self):
+        arg = {15: "1x",
+               16: "2x",
+               17: "4x",
+              }.get(self.zoomvar.get())
+        self._exchange(func="ZOOM", arg=arg)
+
+    def select_palette(self, event=None):
+        arg = self.palettevar.get()
+        self._exchange(func="PSEUDOCOLOR", arg=arg)
+
+    def select_test_info(self, event=None):
+        arg = self.testinfovar.get()
+        self._exchange(func="TEST_INFO", arg=arg)
+
+    def change_cursor_mode(self):
+        arg = {18: "on",
+               19: "off",
+              }.get(self.cursorvar.get())
+        self._exchange(func="COORD_SWITCH", arg=arg)
+
+    def set_cursor_x(self):
+        value = self.cursorxvar.get()
+        self._exchange(func="COORD_X", val=value)
+
+    def set_cursor_y(self):
+        value = self.cursoryvar.get()
+        self._exchange(func="COORD_Y", val=value)
+
+    def change_time_filter_mode(self):
+        arg = {20: "on",
+               21: "off",
+              }.get(self.timefiltervar.get())
+        self._exchange(func="TIME_FILTER", arg=arg)
+
+    def set_time_filter(self, value):
+        self._exchange(func="TIME_INTENS", val=int(value))
+
+    def change_remove_stripe_mode(self):
+        arg = {22: "on",
+               23: "off",
+              }.get(self.removestripevar.get())
+        self._exchange(func="VERT_REMOVAL", arg=arg)
+
+    def set_vertical_stripe(self, value):
         pass
+
+    def change_space_filter_mode(self):
+        arg = {24: "on",
+               25: "off",
+              }.get(self.spacefiltervar.get())
+        self._exchange(func="SPACE_FILTER", arg=arg)
+
+    def set_space_filter(self, value):
+        self._exchange(func="SPACE_INTENS", val=int(value))
+
+    def set_dde(self, value):
+        self._exchange(func="DDE_INTENS", val=int(value))
+
+    def change_dimming_mode(self):
+        arg = {26: "linear",
+               27: "histogram",
+               28: "mixture",
+             }.get(self.dimmingmodevar.get())
+        self._exchange(func="DIMM_MODE", arg=arg)
+
+    def change_ide_enhance_mode(self):
+        arg = {29: "on",
+               30: "off",
+             }.get(self.ideenhancevar.get())
+        self._exchange(func="IDE_SWITCH", arg=arg)
+
+    def change_partition_dimming_mode(self):
+        arg = {31: "on",
+               32: "off",
+               33: "mixture",
+             }.get(self.partitiondimmingvar.get())
+        self._exchange(func="PART_DIMM", arg=arg)
+
+    def set_ide_denoise_level(self, value):
+        self._exchange(func="IDE_NOISE_LEVEL", val=int(value))
+
+    def change_y8_correct_mode(self):
+        arg = {34: "on",
+               35: "off",
+             }.get(self.y8correctvar.get())
+        self._exchange(func="Y8_DEV_CORR", arg=arg)
+
+    def set_ide_filter_level(self, value):
+        arg = {0: "level0",
+               1: "level1",
+               2: "level2",
+               3: "level3",
+             }.get(int(value))
+        self._exchange(func="IDE_LEVEL", arg=arg)
+
+    def set_bright(self, value):
+        self._exchange(func="BRIGHT", val=int(value))
+
+    def set_ide_detail_gain(self, value):
+        self._exchange(func="IDE_GAIN", val=int(value))
+
+    def set_contrast(self, value):
+        self._exchange(func="CONTRAST", val=int(value))
+
+    def zoom_minus(self):
+        self._exchange(func="ZOOM-")
+
+    def zoom_plus(self):
+        self._exchange(func="ZOOM+")
+
+    def focus_minus(self):
+        self._exchange(func="FOCUS-")
+
+    def focus_plus(self):
+        self._exchange(func="FOCUS+")
+
+    def focus_auto(self):
+        self._exchange(func="AUTOFOCUS")
+
+    def view_minus(self):
+        pass
+
+    def view_plus(self):
+        pass
+
+    def wide_view(self):
+        self._exchange(func="FOV", arg="wide")
+
+    def medium_view(self):
+        self._exchange(func="FOV", arg="medium")
+
+    def narrow_view(self):
+        self._exchange(func="FOV", arg="narrow")
+
+    def change_serial_apply_mode(self):
+        pass
+
+    def change_int_gear_mode(self):
+        arg = {38: "manual",
+               39: "semiauto",
+               40: "auto",
+             }.get(self.intgearmodevar.get())
+        self._exchange(func="INT_TIME", arg=arg)
+
+    def change_int_gear_temp(self):
+        arg = {43: "lowtemp",
+               44: "normlemp",
+               45: "hitemp",
+             }.get(self.intgearvar.get())
+        self._exchange(func="INT_TIME", arg=arg)
+
+    def change_base_gear_mode(self):
+        arg = {41: "manual",
+               42: "auto",
+             }.get(self.basegearmodevar.get())
+        self._exchange(func="BACKGROUND", arg=arg)
+
+    def change_base_gear_temp(self):
+        arg = {46: "lowtemp",
+               47: "normlemp",
+               48: "hitemp",
+             }.get(self.basegearvar.get())
+        self._exchange(func="BACKGROUND", arg=arg)
+
+    def b1_capture(self):
+        self._exchange(func="BACKGROUND_B1", arg="get")
+
+    def b1_save(self):
+        self._exchange(func="BACKGROUND_B1", arg="save")
+
+    def b1_load(self):
+        self._exchange(func="BACKGROUND_B1", arg="load")
+
+    def b1_clear(self):
+        self._exchange(func="BACKGROUND_B1", arg="clean")
+
+    def b2_capture(self):
+        self._exchange(func="BACKGROUND_B2", arg="get")
+
+    def b2_save(self):
+        self._exchange(func="BACKGROUND_B2", arg="save")
+
+    def b2_load(self):
+        self._exchange(func="BACKGROUND_B2", arg="load")
+
+    def b2_clear(self):
+        self._exchange(func="BACKGROUND_B2", arg="clean")
+
+    def db_capture(self):
+        self._exchange(func="BACKGROUND_DB", arg="get")
+
+    def db_save(self):
+        self._exchange(func="BACKGROUND_DB", arg="save")
+
+    def db_load(self):
+        self._exchange(func="BACKGROUND_DB", arg="load")
+
+    def comp_shutter(self):
+        self._exchange(func="CORRECTION", arg="shutter")
+
+    def comp_scence(self):
+        self._exchange(func="CORRECTION", arg="scene")
+
+    def comp_virtual(self):
+        self._exchange(func="CORRECTION", arg="defocus")
+
+    def set_int(self):
+        coef = {"ms": 1000,
+                "us": 1,
+               }.get(self.inttimevar.get())
+        self._exchange(func="INT", val=self.intvar.get() * coef)
 
 
 if __name__ == "__main__":
     GavinGui()
-    print("Done")

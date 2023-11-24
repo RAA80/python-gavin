@@ -1,0 +1,161 @@
+#! /usr/bin/env python3
+
+import struct
+
+REQ_HEADER = b"\x55\xAA"
+RESP_HEADER = b"\x55\xBB"
+FOOTER = b"\xF0"
+
+FUNCS = {
+    # Setup page
+    "FRAME_RATE":       (0x02, 0x01, {"set": ((0x00, 0xff), (0x00, 0xff))}),
+    "SYNC_MODE":        (0x02, 0x02, {"internal": (0x00, 0x00),
+                                      "external": (0x00, 0x01),
+                                      "adaptive": (0x00, 0x02)}),
+    "TEST_SCREEN":      (0x02, 0x03, {"realtime": (0x00, 0x00),
+                                      "checkboard": (0x00, 0x01),
+                                      "horizontal": (0x00, 0x02),
+                                      "half": (0x00, 0x03),
+                                      "rolling": (0x00, 0x04),
+                                      "simulation": (0x00, 0x05),
+                                      "vertical": (0x00, 0x06),
+                                      "incremental": (0x00, 0x07)}),
+    "SAVE_SETTINGS":    (0x02, 0x04, {"do": (0x00, 0x01)}),
+    "RESTORE_FACTORY":  (0x02, 0x05, {"do": (0x00, 0x01)}),
+    "SYS_TEMP":         (0x02, 0x06, {"do": (0x00, (0, 50))}),
+    "OBS_MODEL":        (0x02, 0x07, {"advanced": (0x00, 0x00),
+                                      "gain1": (0x00, 0x01),
+                                      "gain2": (0x00, 0x02),
+                                      "gain3": (0x00, 0x03),
+                                      "gain4": (0x00, 0x04)}),
+    "INT_STRENGTH":     (0x02, 0x08, {"auto": (0x00, 0x00),
+                                      "gain1": (0x00, 0x01),
+                                      "gain2": (0x00, 0x02),
+                                      "gain3": (0x00, 0x03)}),
+    # Video setting
+    "ANALOG_VIDEO":     (0x03, 0x01, {"y": (0x00, 0x00),
+                                      "x": (0x00, 0x01),
+                                      "k": (0x00, 0x02),
+                                      "b": (0x00, 0x03)}),
+    "DIGITAL_VIDEO":    (0x03, 0x02, {"y16": (0x00, 0x00),
+                                      "y8": (0x00, 0x01),
+                                      "x": (0x00, 0x02)}),
+    "TEST_INFO":        (0x03, 0x03, {"off": (0x00, 0x00),
+                                      "test1": (0x00, 0x01),
+                                      "test2": (0x00, 0x02),
+                                      "test3": (0x00, 0x03)}),
+    "PSEUDOCOLOR":      (0x03, 0x04, {"whitehot": (0x00, 0x00),
+                                      "fulgurite": (0x00, 0x01),
+                                      "ironred": (0x00, 0x02),
+                                      "hotiron": (0x00, 0x03),
+                                      "medical": (0x00, 0x04),
+                                      "arctic": (0x00, 0x05),
+                                      "rainbow1": (0x00, 0x06),
+                                      "rainbow2": (0x00, 0x07)}),
+    "MIRROR":           (0x03, 0x05, {"off": (0x00, 0x00),
+                                      "x": (0x00, 0x01),
+                                      "y": (0x00, 0x02),
+                                      "xy": (0x00, 0x03)}),
+    "ZOOM":             (0x03, 0x06, {"1x": (0x00, 0x00),
+                                      "2x": (0x00, 0x01),
+                                      "4x": (0x00, 0x02)}),
+    "COORD_SWITCH":     (0x03, 0x07, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "COORD_X":          (0x03, 0x08, {"set": ((0x00, 0xff), (0x00, 0xff))}),
+    "COORD_Y":          (0x03, 0x09, {"set": ((0x00, 0xff), (0x00, 0xff))}),
+    # Algorithm control
+    "TIME_FILTER":      (0x04, 0x01, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "TIME_INTENS":      (0x04, 0x02, {"set": (0x00, (0, 94))}),
+    "VERT_REMOVAL":     (0x04, 0x03, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "SPACE_FILTER":     (0x04, 0x05, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "SPACE_INTENS":     (0x04, 0x06, {"set": (0x00, (0, 9))}),
+    "DDE_INTENS":       (0x04, 0x07, {"set": (0x00, (0, 7))}),
+    "Y8_DEV_CORR":      (0x04, 0x08, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "BRIGHT":           (0x04, 0x09, {"set": (0x00, (0, 100))}),
+    "CONTRAST":         (0x04, 0x0a, {"set": (0x00, (0, 100))}),
+    "PART_DIMM":        (0x04, 0x0b, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01),
+                                      "mixture": (0x00, 0x03)}),
+    "DIMM_MODE":        (0x04, 0x0c, {"linear": (0x00, 0x00),
+                                      "histogram": (0x00, 0x01),
+                                      "mixture": (0x00, 0x02)}),
+    "IDE_LEVEL":        (0x04, 0x0e, {"level0": (0x00, 0x00),
+                                      "level1": (0x00, 0x01),
+                                      "level2": (0x00, 0x02),
+                                      "level3": (0x00, 0x03)}),
+    "IDE_SWITCH":       (0x04, 0x0f, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "IDE_NOISE_LEVEL":  (0x04, 0x10, {"set": (0x00, (0, 9))}),
+    "IDE_GAIN":         (0x04, 0x11, {"set": (0x00, (0, 64))}),
+    # Optical control
+    "FOCUS-":           (0x05, 0x01, {"do": (0x00, 0x01)}),
+    "FOCUS+":           (0x05, 0x01, {"do": (0x00, 0x02)}),
+    "ZOOM-":            (0x05, 0x02, {"do": (0x00, 0x01)}),
+    "ZOOM+":            (0x05, 0x02, {"do": (0x00, 0x02)}),
+    "AUTOFOCUS":        (0x05, 0x03, {"do": (0x00, 0x01)}),
+    "FOV":              (0x05, 0x04, {"wide": (0x00, 0x01),
+                                      "narrow": (0x00, 0x02),
+                                      "medium": (0x00, 0x03)}),
+    # Non-uniform correction
+    "INT_TIME":         (0x06, 0x01, {"auto": (0x01, 0x00),
+                                      "manual": (0x01, 0x01),
+                                      "semiauto": (0x01, 0x02),
+                                      "lowtemp": (0x10, 0x00),
+                                      "normlemp": (0x10, 0x01),
+                                      "hitemp": (0x10, 0x02)}),
+    "INT":              (0x06, 0x02, {"set": ((0x00, 0xff), (0x00, 0xff))}),
+    "BACKGROUND":       (0x06, 0x03, {"auto": (0x01, 0x00),
+                                      "manual": (0x01, 0x01),
+                                      "lowtemp": (0x10, 0x00),
+                                      "normtemp": (0x10, 0x01),
+                                      "hitemp": (0x10, 0x02)}),
+    "BACKGROUND_B1":    (0x06, 0x04, {"get": (0x00, 0x01),
+                                      "save": (0x00, 0x02),
+                                      "load": (0x00, 0x03),
+                                      "clean": (0x00, 0x04)}),
+    "BACKGROUND_B2":    (0x06, 0x05, {"get": (0x00, 0x01),
+                                      "save": (0x00, 0x02),
+                                      "load": (0x00, 0x03),
+                                      "clean": (0x00, 0x04)}),
+    "BACKGROUND_DB":    (0x06, 0x06, {"get": (0x00, 0x01),
+                                      "save": (0x00, 0x02),
+                                      "load": (0x00, 0x03)}),
+    "CORRECTION":       (0x06, 0x07, {"shutter": (0x00, 0x01),
+                                      "scene": (0x00, 0x02),
+                                      "defocus": (0x00, 0x03)}),
+    "CORNERS":          (0x06, 0x08, {"off": (0x00, 0x00),
+                                      "template": (0x00, 0x01),
+                                      "on": (0x00, 0x02)}),
+    "CORNERS_IMAGE":    (0x06, 0x09, {"get": (0x00, 0x01),
+                                      "save": (0x00, 0x02),
+                                      "load": (0x00, 0x03)}),
+    "BADPX_CORRECTION": (0x06, 0x0a, {"off": (0x00, 0x00),
+                                      "on": (0x00, 0x01)}),
+    "BADPX_THRESHOLD":  (0x06, 0x0b, {"set": (0x00, (0, 100))}),
+    "BADPX":            (0x06, 0x0c, {"seek": (0x00, 0x01),
+                                      "save": (0x00, 0x02),
+                                      "load": (0x00, 0x03),
+                                      "clean": (0x00, 0x04)}),
+    "BADPX_MANUAL":     (0x06, 0x0d, {"clean": (0x00, 0x00),
+                                      "add": (0x00, 0x01)}),
+}
+
+
+def make_command(func, arg=None, val=0):
+    func1, func2, args = FUNCS[func.upper()]
+
+    inf1, inf2 = next(iter(args.values())) if arg is None or len(args) == 1 else args[arg.lower()]
+
+    if isinstance(inf1, tuple) and isinstance(inf2, tuple):
+        inf1, inf2 = val >> 8 & 0xff, val & 0xff
+    elif isinstance(inf1, tuple):
+        inf1 = val
+    elif isinstance(inf2, tuple):
+        inf2 = val
+
+    crc = func1 ^ func2 ^ inf1 ^ inf2
+    return REQ_HEADER + struct.pack("<BBBBB", func1, func2, inf1, inf2, crc) + FOOTER
